@@ -2,11 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as assert from 'assert';
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
 import { IExtensionManifest } from 'vs/platform/extensions/common/extensions';
 import { INormalizedVersion, IParsedVersion, isValidExtensionVersion, isValidVersion, isValidVersionStr, normalizeVersion, parseVersion } from 'vs/platform/extensions/common/extensionValidator';
 
 suite('Extension Version Validator', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
 	const productVersion = '2021-05-11T21:54:30.577Z';
 
 	test('isValidVersionStr', () => {
@@ -85,7 +89,7 @@ suite('Extension Version Validator', () => {
 
 	test('isValidVersion', () => {
 		function testIsValidVersion(version: string, desiredVersion: string, expectedResult: boolean): void {
-			let actual = isValidVersion(version, productVersion, desiredVersion);
+			const actual = isValidVersion(version, productVersion, desiredVersion);
 			assert.strictEqual(actual, expectedResult, 'extension - vscode: ' + version + ', desiredVersion: ' + desiredVersion + ' should be ' + expectedResult);
 		}
 
@@ -218,8 +222,8 @@ suite('Extension Version Validator', () => {
 				},
 				main: hasMain ? 'something' : undefined
 			};
-			let reasons: string[] = [];
-			let actual = isValidExtensionVersion(version, productVersion, manifest, isBuiltin, reasons);
+			const reasons: string[] = [];
+			const actual = isValidExtensionVersion(version, productVersion, manifest, isBuiltin, reasons);
 
 			assert.strictEqual(actual, expectedResult, 'version: ' + version + ', desiredVersion: ' + desiredVersion + ', desc: ' + JSON.stringify(manifest) + ', reasons: ' + JSON.stringify(reasons));
 		}

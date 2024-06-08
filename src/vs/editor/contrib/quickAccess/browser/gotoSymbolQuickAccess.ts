@@ -6,6 +6,7 @@
 import { DeferredPromise } from 'vs/base/common/async';
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { Codicon } from 'vs/base/common/codicons';
+import { ThemeIcon } from 'vs/base/common/themables';
 import { IMatch } from 'vs/base/common/filters';
 import { IPreparedQuery, pieceToQuery, prepareQuery, scoreFuzzy2 } from 'vs/base/common/fuzzyScorer';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
@@ -13,22 +14,34 @@ import { format, trim } from 'vs/base/common/strings';
 import { IRange, Range } from 'vs/editor/common/core/range';
 import { ScrollType } from 'vs/editor/common/editorCommon';
 import { ITextModel } from 'vs/editor/common/model';
-import { DocumentSymbol, SymbolKind, SymbolKinds, SymbolTag } from 'vs/editor/common/languages';
+import { DocumentSymbol, SymbolKind, SymbolKinds, SymbolTag, getAriaLabelForSymbol } from 'vs/editor/common/languages';
 import { IOutlineModelService } from 'vs/editor/contrib/documentSymbols/browser/outlineModel';
 import { AbstractEditorNavigationQuickAccessProvider, IEditorNavigationQuickAccessOptions, IQuickAccessTextEditorContext } from 'vs/editor/contrib/quickAccess/browser/editorNavigationQuickAccess';
 import { localize } from 'vs/nls';
-import { IQuickPick, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
+import { IQuickInputButton, IQuickPick, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
 import { ILanguageFeaturesService } from 'vs/editor/common/services/languageFeatures';
+import { Position } from 'vs/editor/common/core/position';
+import { findLast } from 'vs/base/common/arraysFind';
+import { IQuickAccessProviderRunOptions } from 'vs/platform/quickinput/common/quickAccess';
+import { URI } from 'vs/base/common/uri';
 
 export interface IGotoSymbolQuickPickItem extends IQuickPickItem {
 	kind: SymbolKind;
 	index: number;
 	score?: number;
+	uri?: URI;
+	symbolName?: string;
 	range?: { decoration: IRange; selection: IRange };
 }
 
 export interface IGotoSymbolQuickAccessProviderOptions extends IEditorNavigationQuickAccessOptions {
 	openSideBySideDirection?: () => undefined | 'right' | 'down';
+	/**
+	 * A handler to invoke when an item is accepted for
+	 * this particular showing of the quick access.
+	 * @param item The item that was accepted.
+	 */
+	readonly handleAccept?: (item: IQuickPickItem) => void;
 }
 
 export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEditorNavigationQuickAccessProvider {
@@ -56,7 +69,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 		return Disposable.None;
 	}
 
-	protected provideWithTextEditor(context: IQuickAccessTextEditorContext, picker: IQuickPick<IGotoSymbolQuickPickItem>, token: CancellationToken): IDisposable {
+	protected provideWithTextEditor(context: IQuickAccessTextEditorContext, picker: IQuickPick<IGotoSymbolQuickPickItem>, token: CancellationToken, runOptions?: IQuickAccessProviderRunOptions): IDisposable {
 		const editor = context.editor;
 		const model = this.getModel(editor);
 		if (!model) {
@@ -65,7 +78,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 
 		// Provide symbols from model if available in registry
 		if (this._languageFeaturesService.documentSymbolProvider.has(model)) {
-			return this.doProvideWithEditorSymbols(context, model, picker, token);
+			return this.doProvideWithEditorSymbols(context, model, picker, token, runOptions);
 		}
 
 		// Otherwise show an entry for a model without registry
@@ -124,7 +137,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 		return symbolProviderRegistryPromise.p;
 	}
 
-	private doProvideWithEditorSymbols(context: IQuickAccessTextEditorContext, model: ITextModel, picker: IQuickPick<IGotoSymbolQuickPickItem>, token: CancellationToken): IDisposable {
+	private doProvideWithEditorSymbols(context: IQuickAccessTextEditorContext, model: ITextModel, picker: IQuickPick<IGotoSymbolQuickPickItem>, token: CancellationToken, runOptions?: IQuickAccessProviderRunOptions): IDisposable {
 		const editor = context.editor;
 		const disposables = new DisposableStore();
 
@@ -133,6 +146,8 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 			const [item] = picker.selectedItems;
 			if (item && item.range) {
 				this.gotoLocation(context, { range: item.range.selection, keyMods: picker.keyMods, preserveFocus: event.inBackground });
+
+				runOptions?.handleAccept?.(item);
 
 				if (!event.inBackground) {
 					picker.hide();
@@ -155,7 +170,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 
 		// Set initial picks and update on type
 		let picksCts: CancellationTokenSource | undefined = undefined;
-		const updatePickerItems = async () => {
+		const updatePickerItems = async (positionToEnclose: Position | undefined) => {
 
 			// Cancel any previous ask for picks and busy
 			picksCts?.dispose(true);
@@ -168,13 +183,20 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 			picker.busy = true;
 			try {
 				const query = prepareQuery(picker.value.substr(AbstractGotoSymbolQuickAccessProvider.PREFIX.length).trim());
-				const items = await this.doGetSymbolPicks(symbolsPromise, query, undefined, picksCts.token);
+				const items = await this.doGetSymbolPicks(symbolsPromise, query, undefined, picksCts.token, model);
 				if (token.isCancellationRequested) {
 					return;
 				}
 
 				if (items.length > 0) {
 					picker.items = items;
+					if (positionToEnclose && query.original.length === 0) {
+						const candidate = <IGotoSymbolQuickPickItem>findLast(items, item => Boolean(item.type !== 'separator' && item.range && Range.containsPosition(item.range.decoration, positionToEnclose)));
+						if (candidate) {
+							picker.activeItems = [candidate];
+						}
+					}
+
 				} else {
 					if (query.original.length > 0) {
 						this.provideLabelPick(picker, localize('noMatchingSymbolResults', "No matching editor symbols"));
@@ -188,21 +210,14 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 				}
 			}
 		};
-		disposables.add(picker.onDidChangeValue(() => updatePickerItems()));
-		updatePickerItems();
+		disposables.add(picker.onDidChangeValue(() => updatePickerItems(undefined)));
+		updatePickerItems(editor.getSelection()?.getPosition());
+
 
 		// Reveal and decorate when active item changes
-		// However, ignore the very first event so that
-		// opening the picker is not immediately revealing
-		// and decorating the first entry.
-		let ignoreFirstActiveEvent = true;
 		disposables.add(picker.onDidChangeActive(() => {
 			const [item] = picker.activeItems;
 			if (item && item.range) {
-				if (ignoreFirstActiveEvent) {
-					ignoreFirstActiveEvent = false;
-					return;
-				}
 
 				// Reveal
 				editor.revealRangeInCenter(item.range.selection, ScrollType.Smooth);
@@ -215,7 +230,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 		return disposables;
 	}
 
-	protected async doGetSymbolPicks(symbolsPromise: Promise<DocumentSymbol[]>, query: IPreparedQuery, options: { extraContainerLabel?: string } | undefined, token: CancellationToken): Promise<Array<IGotoSymbolQuickPickItem | IQuickPickSeparator>> {
+	protected async doGetSymbolPicks(symbolsPromise: Promise<DocumentSymbol[]>, query: IPreparedQuery, options: { extraContainerLabel?: string } | undefined, token: CancellationToken, model: ITextModel): Promise<Array<IGotoSymbolQuickPickItem | IQuickPickSeparator>> {
 		const symbols = await symbolsPromise;
 		if (token.isCancellationRequested) {
 			return [];
@@ -235,6 +250,16 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 		}
 
 		// Convert to symbol picks and apply filtering
+
+		let buttons: IQuickInputButton[] | undefined;
+		const openSideBySideDirection = this.options?.openSideBySideDirection?.();
+		if (openSideBySideDirection) {
+			buttons = [{
+				iconClass: openSideBySideDirection === 'right' ? ThemeIcon.asClassName(Codicon.splitHorizontal) : ThemeIcon.asClassName(Codicon.splitVertical),
+				tooltip: openSideBySideDirection === 'right' ? localize('openToSide', "Open to the Side") : localize('openToBottom', "Open to the Bottom")
+			}];
+		}
+
 		const filteredSymbolPicks: IGotoSymbolQuickPickItem[] = [];
 		for (let index = 0; index < symbols.length; index++) {
 			const symbol = symbols[index];
@@ -303,7 +328,7 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 				kind: symbol.kind,
 				score: symbolScore,
 				label: symbolLabelWithIcon,
-				ariaLabel: symbolLabel,
+				ariaLabel: getAriaLabelForSymbol(symbol.name, symbol.kind),
 				description: containerLabel,
 				highlights: deprecated ? undefined : {
 					label: symbolMatches,
@@ -313,20 +338,10 @@ export abstract class AbstractGotoSymbolQuickAccessProvider extends AbstractEdit
 					selection: Range.collapseToStart(symbol.selectionRange),
 					decoration: symbol.range
 				},
+				uri: model.uri,
+				symbolName: symbolLabel,
 				strikethrough: deprecated,
-				buttons: (() => {
-					const openSideBySideDirection = this.options?.openSideBySideDirection ? this.options?.openSideBySideDirection() : undefined;
-					if (!openSideBySideDirection) {
-						return undefined;
-					}
-
-					return [
-						{
-							iconClass: openSideBySideDirection === 'right' ? Codicon.splitHorizontal.classNames : Codicon.splitVertical.classNames,
-							tooltip: openSideBySideDirection === 'right' ? localize('openToSide', "Open to the Side") : localize('openToBottom', "Open to the Bottom")
-						}
-					];
-				})()
+				buttons
 			});
 		}
 

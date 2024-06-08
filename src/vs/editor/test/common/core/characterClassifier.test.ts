@@ -2,14 +2,17 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as assert from 'assert';
+import assert from 'assert';
 import { CharCode } from 'vs/base/common/charCode';
+import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
 import { CharacterClassifier } from 'vs/editor/common/core/characterClassifier';
 
 suite('CharacterClassifier', () => {
 
+	ensureNoDisposablesAreLeakedInTestSuite();
+
 	test('works', () => {
-		let classifier = new CharacterClassifier<number>(0);
+		const classifier = new CharacterClassifier<number>(0);
 
 		assert.strictEqual(classifier.get(-1), 0);
 		assert.strictEqual(classifier.get(0), 0);

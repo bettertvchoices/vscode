@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
+import assert from 'assert';
 import { IRange } from 'vs/editor/common/core/range';
 import { Selection, ISelection } from 'vs/editor/common/core/selection';
 import { ICommand, IEditOperationBuilder } from 'vs/editor/common/editorCommon';
@@ -54,8 +54,8 @@ export function testCommand(
  * Extract edit operations if command `command` were to execute on model `model`
  */
 export function getEditOperation(model: ITextModel, command: ICommand): ISingleEditOperation[] {
-	let operations: ISingleEditOperation[] = [];
-	let editOperationBuilder: IEditOperationBuilder = {
+	const operations: ISingleEditOperation[] = [];
+	const editOperationBuilder: IEditOperationBuilder = {
 		addEditOperation: (range: IRange, text: string, forceMoveMarkers: boolean = false) => {
 			operations.push({
 				range: range,
